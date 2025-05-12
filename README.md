@@ -32,7 +32,9 @@ The algorithm follows these core steps:
 
 ### 🔻 Final Alignment of 3D Model
 
-[![Final Result](https://drive.google.com/uc?id=1CoDUqav9gJyndGIWlyXlJq3_rqGWukT0)](https://drive.google.com/file/d/1CoDUqav9gJyndGIWlyXlJq3_rqGWukT0/view?usp=sharing)
+<a href="https://drive.google.com/file/d/1CoDUqav9gJyndGIWlyXlJq3_rqGWukT0/view?usp=sharing" target="_blank">
+  <img src="https://drive.google.com/uc?id=1CoDUqav9gJyndGIWlyXlJq3_rqGWukT0" width="500"/>
+</a>
 
 **Description:**  
 The red wireframe cube represents the projected 3D model aligned over the blue 2D image corners. This result reflects the convergence of rotation, translation, and scale to achieve accurate model-to-image registration.
@@ -41,20 +43,24 @@ The red wireframe cube represents the projected 3D model aligned over the blue 2
 
 ### 🔄 Iterative Alignment Convergence
 
-[![Iteration Progress](https://drive.google.com/uc?id=17Q-jlstKz4hvFUAoVInLXACeJm8bL6KL)](https://drive.google.com/file/d/17Q-jlstKz4hvFUAoVInLXACeJm8bL6KL/view?usp=sharing)
+<a href="https://drive.google.com/file/d/17Q-jlstKz4hvFUAoVInLXACeJm8bL6KL/view?usp=sharing" target="_blank">
+  <img src="https://drive.google.com/uc?id=17Q-jlstKz4hvFUAoVInLXACeJm8bL6KL" width="500"/>
+</a>
 
 **Description:**  
-This panel shows the cube’s transformation over 80,000 iterations. From a randomly initialized pose (top-left), the model gradually aligns with the image keypoints. The final frame (bottom-right) shows the registered cube in green, accurately matching the detected corners. This validates the robustness and effectiveness of the iterative optimization.
+This panel shows the cube’s transformation over 80,000 iterations. From a randomly initialized pose (top-left), the model gradually aligns with the image keypoints. The final frame (bottom-right) shows the registered cube in green, accurately matching the detected corners.
 
 ---
 
 ### 📉 Residual Error Over Iterations
 
-[![Error Plot](https://drive.google.com/uc?id=1QOqkKoeBBYD1NbZHD5Ni-7SyBtBlDGlU)](https://drive.google.com/file/d/1QOqkKoeBBYD1NbZHD5Ni-7SyBtBlDGlU/view?usp=sharing)
+<a href="https://drive.google.com/file/d/1QOqkKoeBBYD1NbZHD5Ni-7SyBtBlDGlU/view?usp=sharing" target="_blank">
+  <img src="https://drive.google.com/uc?id=1QOqkKoeBBYD1NbZHD5Ni-7SyBtBlDGlU" width="500"/>
+</a>
 
 **Description:**  
-The error plot shows how the average residual error (Huber loss) decreases over time. A sharp initial drop is followed by steady refinement, confirming proper convergence. Local minima are addressed via stochastic restarts to maintain descent.
-
+The error plot shows how the average residual error (Huber loss) decreases over time. A sharp initial drop is followed by steady refinement, confirming proper convergence.
+ 
 ---
 
 ## 🛠️ Technologies Used
