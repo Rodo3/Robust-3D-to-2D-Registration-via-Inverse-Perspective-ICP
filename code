@@ -1,0 +1,182 @@
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.spatial import KDTree
+
+
+def detect_image_corners(image_gray, max_corners=20, quality=0.01, min_dist=30):
+    pts = cv2.goodFeaturesToTrack(
+        image_gray,
+        maxCorners=max_corners,
+        qualityLevel=quality,
+        minDistance=min_dist
+    )
+    return np.squeeze(pts).astype(np.float32)
+
+
+class RobustICP3D2D:
+    def __init__(self, model_3d_points, focal_length, image_size):
+        self.model_3d = model_3d_points
+        self.focal = focal_length
+        self.cx, self.cy = image_size[0] / 2, image_size[1] / 2
+
+        self.edges = [
+            (0, 1), (1, 2), (2, 3), (3, 0),
+            (4, 5), (5, 6), (6, 7), (7, 4),
+            (0, 4), (1, 5), (2, 6), (3, 7)
+        ]
+
+    def project(self, R, t, scale=np.ones(3)):
+        P = (R @ (self.model_3d * scale).T).T + t
+        x = P[:, 0] * self.focal / P[:, 2] + self.cx
+        y = P[:, 1] * self.focal / P[:, 2] + self.cy
+        return np.column_stack([x, y]), P
+
+    def closest_points(self, img_pts, R, t, scale=np.ones(3)):
+        proj2d, cam3d = self.project(R, t, scale)
+        tree = KDTree(img_pts)
+        idx = [tree.query(p)[1] for p in proj2d]
+        img_matched = img_pts[idx]
+        dirs = np.column_stack([
+            (img_matched[:, 0] - self.cx),
+            (img_matched[:, 1] - self.cy),
+            np.full(len(img_matched), self.focal)
+        ])
+        dirs /= np.linalg.norm(dirs, axis=1)[:, None]
+        lam = np.einsum('ij,ij->i', cam3d, dirs)
+        dst3d = dirs * lam[:, None]
+        return cam3d, dst3d
+
+    def estimate_rigid_and_scale(self, X, Y, weights=None):
+        if weights is None:
+            weights = np.ones(len(X))
+        cX = np.average(X, axis=0, weights=weights)
+        cY = np.average(Y, axis=0, weights=weights)
+        Xc = X - cX
+        Yc = Y - cY
+        H = (Xc * weights[:, None]).T @ Yc
+        U, _, Vt = np.linalg.svd(H)
+        R = Vt.T @ U.T
+        if np.linalg.det(R) < 0:
+            Vt[-1, :] *= -1
+            R = Vt.T @ U.T
+        t = cY - R @ cX
+        Xc_rot = (R @ Xc.T).T
+        numer = np.sum(weights * np.sum(Yc * Xc_rot, axis=1))
+        denom = np.sum(weights * np.sum(Xc_rot**2, axis=1))
+        s = numer / denom
+        scale = np.array([s, s, s])
+        return R, t, scale
+
+    def optimize_registration(self, R, t, img_pts, gray=None, show_live=False, max_iter=50000):
+        scale = np.ones(3)
+        history_err = []
+        history_R = []
+        history_t = []
+        history_scale = []
+
+        for it in range(max_iter):
+            src3d, dst3d = self.closest_points(img_pts, R, t, scale)
+            residuals = np.linalg.norm(src3d - dst3d, axis=1)
+            sigma = 1.4826 * np.median(residuals)
+            sigma = max(sigma, 1e-8)
+            delta = 1.0 * sigma
+
+            weights = np.ones_like(residuals)
+            mask = np.abs(residuals) > delta
+            weights[mask] = (delta**2) / (residuals[mask]**2 + 1e-8)
+
+            R_update, t_update, scale_update = self.estimate_rigid_and_scale(src3d, dst3d, weights)
+            R = R_update @ R
+            t = R_update @ t + t_update
+            scale = scale * scale_update
+
+            mean_err = np.mean(residuals)
+            history_err.append(mean_err)
+            history_R.append(R.copy())
+            history_t.append(t.copy())
+            history_scale.append(scale.copy())
+
+            if show_live and gray is not None and it % 20 == 0:
+                self.display_iteration(gray.copy(), img_pts.copy(), R.copy(), t.copy(), scale.copy(), it, mean_err)
+
+            if mean_err < 1e-12:
+                break
+
+            if it > 50 and np.abs(history_err[-1] - history_err[-2]) < 1e-6:
+                t += np.random.normal(scale=5.0, size=3)
+                R = R @ cv2.Rodrigues(np.random.normal(scale=0.2, size=3))[0]
+
+        if show_live:
+            cv2.destroyAllWindows()
+
+        return R, t, scale, history_err, history_R, history_t, history_scale
+
+    def display_iteration(self, gray, img_pts, R, t, scale, iter_num, mean_err):
+        frame = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+        proj2d, _ = self.project(R, t, scale)
+        for (i, j) in self.edges:
+            pt1 = tuple(np.int32(proj2d[i]))
+            pt2 = tuple(np.int32(proj2d[j]))
+            cv2.line(frame, pt1, pt2, (0, 0, 255), 1)
+        for p in img_pts:
+            cv2.circle(frame, tuple(np.int32(p)), 3, (255, 0, 0), -1)
+        cv2.putText(frame, f"Iter {iter_num}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        cv2.putText(frame, f"Error: {mean_err:.2f}", (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 2)
+        cv2.imshow("ICP Iteraciones", frame)
+        cv2.waitKey(1)
+
+    def visualize(self, gray, img_pts, R, t, scale, R_hist, scale_hist, err_hist):
+        P2d, _ = self.project(R, t, scale)
+        plt.figure(figsize=(6, 6))
+        plt.imshow(gray, cmap='gray')
+        plt.axis('off')
+        for e in self.edges:
+            p, q = P2d[e[0]], P2d[e[1]]
+            plt.plot([p[0], q[0]], [p[1], q[1]], '-r')
+        plt.scatter(img_pts[:, 0], img_pts[:, 1], c='b', s=30)
+        plt.gca().invert_yaxis()
+        plt.title("Resultado final")
+        plt.show()
+
+        fig, axes = plt.subplots(2, 3, figsize=(14, 8))
+        for k, ax in enumerate(axes.flat[:3]):
+            idx = k * len(R_hist) // 3
+            P2d, _ = self.project(R_hist[idx], t, scale_hist[idx])
+            ax.imshow(gray, cmap='gray')
+            ax.axis('off')
+            for e in self.edges:
+                p, q = P2d[e[0]], P2d[e[1]]
+                ax.plot([p[0], q[0]], [p[1], q[1]], '-r')
+            ax.scatter(img_pts[:, 0], img_pts[:, 1], c='b')
+            ax.set_title(f"Iteracion {idx}")
+
+        ax2 = axes.flat[4]
+        ax2.plot(err_hist, '-o')
+        ax2.set_title("Error medio (Huber)")
+        ax2.set_xlabel("Iteraciones")
+        ax2.set_ylabel("Error promedio")
+        ax2.grid()
+        plt.tight_layout()
+        plt.show()
+
+
+if __name__ == "__main__":
+    img = cv2.imread("OpenCVPhotos/input.png")
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img_pts = detect_image_corners(gray, max_corners=20, quality=0.01, min_dist=30)
+
+    m3d = np.array([
+        [0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0],
+        [0, 0, 1], [1, 0, 1], [1, 1, 1], [0, 1, 1]
+    ], float)
+    m3d = (m3d - 0.5) * 180
+
+    R0, _ = cv2.Rodrigues(np.random.uniform(-0.1, 0.1, size=3))
+    t0 = np.array([50., -40., 1600.]) + np.random.normal(scale=10, size=3)
+
+    icp = RobustICP3D2D(m3d, focal_length=1500, image_size=gray.shape[::-1])
+    Rf, tf, scale_final, errs, Rh, Th, sh = icp.optimize_registration(
+        R0, t0, img_pts, gray=gray, show_live=True, max_iter=45000
+    )
+    icp.visualize(gray, img_pts, Rf, tf, scale_final, Rh, sh, errs)
